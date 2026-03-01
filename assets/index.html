@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UNO Q 视觉追踪控制台</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #00f2ff; /* 霓虹蓝 */
+            --bg-color: #0f1115;      /* 深黑背景 */
+            --card-bg: rgba(30, 34, 45, 0.8); /* 半透明卡片 */
+            --text-color: #e0e6ed;
+            --danger-color: #ff2a6d;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 50% 0%, #1a2c38 0%, var(--bg-color) 80%);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        /* 头部样式 */
+        header {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 0 10px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--primary-color);
+            text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+        }
+
+        .status-dot {
+            height: 12px;
+            width: 12px;
+            background-color: #555;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+            transition: 0.3s;
+        }
+        .status-dot.connected {
+            background-color: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        /* 视频容器 - 响应式放大 */
+        .video-container {
+            width: 100%;
+            max-width: 800px; /* 最大宽度限制，防止在超宽屏上过大 */
+            aspect-ratio: 4 / 3; /* 保持摄像头标准比例 */
+            background: #000;
+            border-radius: 12px;
+            border: 2px solid #333;
+            box-shadow: 0 0 30px rgba(0, 242, 255, 0.15);
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: contain; /* 保持比例，不拉伸 */
+            display: block;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--primary-color);
+            border: 1px solid var(--primary-color);
+            font-family: monospace;
+        }
+
+        /* 控制面板卡片 */
+        .controls-card {
+            width: 100%;
+            max-width: 800px;
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 25px;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 自动模式开关 */
+        .mode-switch {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .switch-label {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 自定义 Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #333;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(30px); }
+
+        /* 滑块组 */
+        .slider-group {
+            margin-bottom: 25px;
+            display: grid;
+            grid-template-columns: 80px 1fr 60px;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .slider-group label {
+            font-weight: bold;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 自定义 Range Input */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]:focus { outline: none; }
+        
+        /* 滑轨 */
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #333;
+            border-radius: 4px;
+        }
+        
+        /* 滑块按钮 */
+        input[type=range]::-webkit-slider-thumb {
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: var(--text-color);
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -6px; /* 垂直居中 */
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+            transition: 0.2s;
+        }
+        input[type=range]:not(:disabled)::-webkit-slider-thumb:hover {
+            background: var(--primary-color);
+            transform: scale(1.1);
+        }
+
+        /* 禁用状态 */
+        input[type=range]:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        /* 数值显示 */
+        .value-box {
+            background: rgba(0,0,0,0.3);
+            padding: 5px 10px;
+            border-radius: 6px;
+            color: var(--primary-color);
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            text-align: center;
+            min-width: 40px;
+        }
+
+        /* 手机适配 */
+        @media (max-width: 600px) {
+            h1 { font-size: 18px; }
+            .slider-group { grid-template-columns: 60px 1fr 50px; gap: 10px; }
+            body { padding: 10px; }
+            .color-presets { gap: 6px; }
+            .preset-btn { width: 32px; height: 32px; }
+        }
+
+        /* === � PID 调参面板 === */
+        .pid-section {
+            padding-top: 20px;
+            margin-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .pid-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .pid-header .title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pid-header .toggle-arrow {
+            color: #666;
+            transition: transform 0.3s;
+            font-size: 12px;
+        }
+        .pid-header .toggle-arrow.open {
+            transform: rotate(180deg);
+        }
+        .pid-body {
+            display: none;
+        }
+        .pid-body.open {
+            display: block;
+        }
+        .pid-slider-group {
+            display: grid;
+            grid-template-columns: 90px 1fr 70px;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .pid-slider-group label {
+            font-weight: bold;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pid-slider-group label .param-tag {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .tag-p { background: #e05050; }
+        .tag-i { background: #40a040; }
+        .tag-d { background: #4080e0; }
+        .tag-dz { background: #888; }
+        .pid-value {
+            background: rgba(0,0,0,0.3);
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: var(--primary-color);
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            text-align: center;
+            font-size: 13px;
+        }
+        .pid-presets {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .pid-preset-btn {
+            padding: 5px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.05);
+            color: #ccc;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pid-preset-btn:hover {
+            background: rgba(0, 242, 255, 0.15);
+            border-color: var(--primary-color);
+            color: #fff;
+        }
+        .pid-preset-btn.active {
+            background: rgba(0, 242, 255, 0.2);
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+        .color-section {
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .color-section-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #aaa;
+        }
+        .color-picker-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        /* 色盘输入框 -> 改为 Hue 滑条 */
+        .hue-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 180px;
+        }
+        .color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 3px solid rgba(255,255,255,0.2);
+            box-shadow: 0 0 12px rgba(0, 242, 255, 0.15);
+            flex-shrink: 0;
+            background: hsl(60, 80%, 55%);
+            transition: background 0.15s;
+        }
+        #hueSlider {
+            -webkit-appearance: none;
+            flex: 1;
+            height: 12px;
+            border-radius: 6px;
+            background: linear-gradient(to right,
+                hsl(0,100%,50%), hsl(30,100%,50%), hsl(60,100%,50%),
+                hsl(90,100%,50%), hsl(120,100%,50%), hsl(150,100%,50%),
+                hsl(180,100%,50%), hsl(210,100%,50%), hsl(240,100%,50%),
+                hsl(270,100%,50%), hsl(300,100%,50%), hsl(330,100%,50%),
+                hsl(360,100%,50%));
+            outline: none;
+            cursor: pointer;
+        }
+        #hueSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid rgba(0,0,0,0.3);
+            box-shadow: 0 0 6px rgba(0,0,0,0.4);
+            cursor: pointer;
+        }
+        .hue-value {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: var(--primary-color);
+            min-width: 28px;
+            text-align: center;
+        }
+        /* 预设色块 */
+        .color-presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .preset-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.15);
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .preset-btn:hover {
+            transform: scale(1.15);
+            border-color: #fff;
+        }
+        .preset-btn.active {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 10px var(--primary-color);
+        }
+        .preset-btn::after {
+            content: attr(data-name);
+            position: absolute;
+            bottom: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: #888;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .preset-btn:hover::after {
+            opacity: 1;
+        }
+        /* HSV 当前值显示 */
+        .hsv-display {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #888;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 10px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+
+        /* === 🔧 舵机校准模块 === */
+        .calibration-panel {
+            padding-top: 20px;
+            margin-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .calibration-panel .calib-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .calibration-panel .calib-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #aaa;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .calib-toggle-btn {
+            background: rgba(255, 174, 0, 0.1);
+            border: 1px solid #ffae00;
+            color: #ffae00;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+        .calib-toggle-btn:hover {
+            background: rgba(255, 174, 0, 0.2);
+        }
+        .calib-toggle-btn.active {
+            background: #ffae00;
+            color: #000;
+            box-shadow: 0 0 10px rgba(255, 174, 0, 0.4);
+        }
+        .calib-body {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .calib-hint {
+            font-size: 11px;
+            color: #666;
+            line-height: 1.6;
+        }
+        .calib-fine-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .calib-axis {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .calib-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: #888;
+            width: 32px;
+            text-align: right;
+        }
+        .calib-btn {
+            background: #222;
+            border: 1px solid #444;
+            color: #ccc;
+            width: 32px;
+            height: 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .calib-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+        .calib-btn:active { background: var(--primary-color); color: #000; border-color: transparent; }
+        .calib-current {
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--primary-color);
+            min-width: 40px;
+            text-align: center;
+        }
+        .calib-center-btn {
+            background: rgba(0, 242, 255, 0.08);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            color: var(--primary-color);
+            padding: 6px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+            margin-top: 2px;
+        }
+        .calib-center-btn:hover { background: rgba(0, 242, 255, 0.15); }
+        .calib-center-btn:active { background: var(--primary-color); color: #000; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1><i class="fas fa-robot"></i> UNO Q <span style="font-size:0.6em; color:#fff; opacity:0.7;">VISION</span></h1>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #888;">
+            状态 <div id="connStatus" class="status-dot"></div>
+        </div>
+    </header>
+
+    <div class="video-container">
+        <img id="videoStream" src="" alt="等待视频信号...">
+        <div class="video-overlay"><i class="fas fa-video"></i> LIVE FEED</div>
+    </div>
+
+    <div class="controls-card">
+        <div class="mode-switch">
+            <div class="switch-label">
+                <i class="fas fa-crosshairs" style="color: var(--primary-color);"></i>
+                自动追踪 (Auto Track)
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="autoToggle" onchange="toggleMode(this)">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <!-- 🎨 色盘选择区 -->
+        <div class="color-section" id="colorSection">
+            <div class="color-section-title">
+                <i class="fas fa-palette" style="color: var(--primary-color);"></i>
+                追踪颜色 (Target Color)
+            </div>
+            <div class="color-picker-row">
+                <div class="hue-row">
+                    <div class="color-preview" id="colorPreview"></div>
+                    <input type="range" id="hueSlider" min="0" max="180" value="30" oninput="onHueChange(this.value)">
+                    <span class="hue-value" id="hueValue">30</span>
+                </div>
+                <div class="color-presets">
+                    <button class="preset-btn active" style="background:#d4d422;" data-name="黄" data-hue="30" onclick="selectPreset(this)"></button>
+                    <button class="preset-btn" style="background:#e03030;" data-name="红" data-hue="0" onclick="selectPreset(this)"></button>
+                    <button class="preset-btn" style="background:#30b030;" data-name="绿" data-hue="60" onclick="selectPreset(this)"></button>
+                    <button class="preset-btn" style="background:#3070e0;" data-name="蓝" data-hue="110" onclick="selectPreset(this)"></button>
+                    <button class="preset-btn" style="background:#e07020;" data-name="橙" data-hue="15" onclick="selectPreset(this)"></button>
+                    <button class="preset-btn" style="background:#d040d0;" data-name="紫" data-hue="150" onclick="selectPreset(this)"></button>
+                </div>
+                <div class="hsv-display" id="hsvDisplay">H:20~40 S:80~255 V:80~255</div>
+            </div>
+        </div>
+
+        <div class="slider-group">
+            <label><i class="fas fa-arrows-alt-h"></i> Pan</label>
+            <input type="range" id="range_pan" min="0" max="180" value="90" oninput="handleInput('control_pan', this.value)">
+            <div class="value-box"><span id="val_pan">90</span>°</div>
+        </div>
+        
+        <div class="slider-group">
+            <label><i class="fas fa-arrows-alt-v"></i> Tilt</label>
+            <input type="range" id="range_tilt" min="30" max="150" value="90" oninput="handleInput('control_tilt', this.value)">
+            <div class="value-box"><span id="val_tilt">90</span>°</div>
+        </div>
+
+        <!-- 🔧 舵机中位校准 -->
+        <div class="calibration-panel">
+            <div class="calib-title-row">
+                <div class="calib-title">
+                    <i class="fas fa-wrench" style="color: #ffae00;"></i>
+                    舵机校准 (Servo Calibration)
+                </div>
+                <button class="calib-toggle-btn" id="calibToggle" onclick="toggleCalibMode()">开始校准</button>
+            </div>
+            <div class="calib-body" id="calibBody">
+                <div class="calib-hint">
+                    ⏲ 校准流程：点击 "开始校准" → 两轴自动回中 90° →<br>微调满意后安装舵机摇臂 → 点击 "完成校准"
+                </div>
+                <div class="calib-fine-group" id="calibControls" style="display:none;">
+                    <div class="calib-axis">
+                        <span class="calib-label">PAN</span>
+                        <button class="calib-btn" onclick="calibNudge('pan', -5)">-5</button>
+                        <button class="calib-btn" onclick="calibNudge('pan', -1)">-1</button>
+                        <span class="calib-current" id="calib-pan-val">90°</span>
+                        <button class="calib-btn" onclick="calibNudge('pan', +1)">+1</button>
+                        <button class="calib-btn" onclick="calibNudge('pan', +5)">+5</button>
+                    </div>
+                    <div class="calib-axis">
+                        <span class="calib-label">TILT</span>
+                        <button class="calib-btn" onclick="calibNudge('tilt', -5)">-5</button>
+                        <button class="calib-btn" onclick="calibNudge('tilt', -1)">-1</button>
+                        <span class="calib-current" id="calib-tilt-val">90°</span>
+                        <button class="calib-btn" onclick="calibNudge('tilt', +1)">+1</button>
+                        <button class="calib-btn" onclick="calibNudge('tilt', +5)">+5</button>
+                    </div>
+                    <button class="calib-center-btn" onclick="calibCenter()">🎯 回中 90°</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🎯 PID 调参面板 -->
+        <div class="pid-section">
+            <div class="pid-header" onclick="togglePidPanel()">
+                <div class="title">
+                    <i class="fas fa-sliders-h" style="color: var(--primary-color);"></i>
+                    PID 调参 (Tuning)
+                </div>
+                <i class="fas fa-chevron-down toggle-arrow" id="pidArrow"></i>
+            </div>
+            <div class="pid-body" id="pidBody">
+                <div class="pid-presets">
+                    <button class="pid-preset-btn active" data-kp="0.035" data-ki="0.0005" data-kd="0.025" data-dz="20" onclick="applyPidPreset(this)">默认</button>
+                    <button class="pid-preset-btn" data-kp="0.08" data-ki="0" data-kd="0" data-dz="10" onclick="applyPidPreset(this)">纯 P (快捷)</button>
+                    <button class="pid-preset-btn" data-kp="0.02" data-ki="0.002" data-kd="0.03" data-dz="25" onclick="applyPidPreset(this)">保守 (平稳)</button>
+                    <button class="pid-preset-btn" data-kp="0.06" data-ki="0.003" data-kd="0.04" data-dz="10" onclick="applyPidPreset(this)">激进 (灵敏)</button>
+                </div>
+                <div class="pid-slider-group">
+                    <label><span class="param-tag tag-p">Kp</span> 比例</label>
+                    <input type="range" id="pid_kp" min="0" max="0.15" step="0.001" value="0.035" oninput="onPidChange()">
+                    <div class="pid-value" id="val_kp">0.035</div>
+                </div>
+                <div class="pid-slider-group">
+                    <label><span class="param-tag tag-i">Ki</span> 积分</label>
+                    <input type="range" id="pid_ki" min="0" max="0.01" step="0.0001" value="0.0005" oninput="onPidChange()">
+                    <div class="pid-value" id="val_ki">0.0005</div>
+                </div>
+                <div class="pid-slider-group">
+                    <label><span class="param-tag tag-d">Kd</span> 微分</label>
+                    <input type="range" id="pid_kd" min="0" max="0.1" step="0.001" value="0.025" oninput="onPidChange()">
+                    <div class="pid-value" id="val_kd">0.025</div>
+                </div>
+                <div class="pid-slider-group">
+                    <label><span class="param-tag tag-dz">DZ</span> 死区</label>
+                    <input type="range" id="pid_dz" min="0" max="60" step="1" value="20" oninput="onPidChange()">
+                    <div class="pid-value" id="val_dz">20 px</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化 Socket.io
+        const socket = io();
+        const img = document.getElementById('videoStream');
+        const connStatus = document.getElementById('connStatus');
+
+        // Socket 连接状态监控
+        socket.on('connect', () => {
+            connStatus.classList.add('connected');
+            console.log("已连接到 UNO Q");
+        });
+
+        socket.on('disconnect', () => {
+            connStatus.classList.remove('connected');
+            console.log("连接断开");
+        });
+
+        // 1. 接收视频流 (Base64)
+        socket.on('frame', (data) => {
+            if(data && data.image) {
+                img.src = 'data:image/jpeg;base64,' + data.image;
+            }
+        });
+
+        // 2. 接收后端同步的舵机数据 (自动模式下同步滑块)
+        socket.on('update_sliders', (data) => {
+            updateSliderUI('range_pan', 'val_pan', data.pan);
+            updateSliderUI('range_tilt', 'val_tilt', data.tilt);
+        });
+
+        // 辅助函数：更新 UI 而不触发发送事件
+        function updateSliderUI(sliderId, displayId, value) {
+            const slider = document.getElementById(sliderId);
+            const display = document.getElementById(displayId);
+            // 只有当接收到的值与当前值不同时才更新，减少抖动
+            if (slider.value != value) {
+                slider.value = value;
+                display.innerText = parseInt(value);
+            }
+        }
+
+        // 3. 处理手动输入
+        function handleInput(event_name, val) {
+            // 如果开启了自动模式，强制不发送数据（虽然禁用了 input，但防一手）
+            const isAuto = document.getElementById('autoToggle').checked;
+            if(isAuto) return; 
+
+            // 更新本地显示
+            if(event_name === 'control_pan') document.getElementById('val_pan').innerText = val;
+            if(event_name === 'control_tilt') document.getElementById('val_tilt').innerText = val;
+            
+            // 发送给后端
+            socket.emit(event_name, val);
+        }
+
+        // 4. 切换模式
+        function toggleMode(checkbox) {
+            const isAuto = checkbox.checked;
+            const panSlider = document.getElementById('range_pan');
+            const tiltSlider = document.getElementById('range_tilt');
+            
+            // 视觉上禁用/启用滑块
+            panSlider.disabled = isAuto;
+            tiltSlider.disabled = isAuto;
+            
+            // 发送给后端
+            socket.emit('toggle_mode', isAuto);
+        }
+
+        // ===== 🎨 色盘逻辑 =====
+
+        // OpenCV Hue (0-180) 直接计算追踪范围，不再经过 hex 转换
+        function hueToRange(h) {
+            h = parseInt(h);
+            if (isNaN(h)) return null;
+            const hTol = 15;
+            let h_low = h - hTol;
+            let h_high = h + hTol;
+            if (h_low < 0) h_low += 180;
+            if (h_high > 180) h_high -= 180;
+            return {
+                h_low:  h_low,
+                s_low:  80,
+                v_low:  80,
+                h_high: h_high,
+                s_high: 255,
+                v_high: 255
+            };
+        }
+
+        // Hue 转 CSS hsl 颜色 (OpenCV H 0-180 → CSS H 0-360)
+        function hueToCSS(h) {
+            return `hsl(${h * 2}, 80%, 55%)`;
+        }
+
+        // 发送颜色到后端
+        function applyHue(h) {
+            const range = hueToRange(h);
+            if (!range) return;
+            socket.emit('set_color', range);
+            document.getElementById('hsvDisplay').textContent =
+                `H:${range.h_low}~${range.h_high} S:${range.s_low}~${range.s_high} V:${range.v_low}~${range.v_high}`;
+            document.getElementById('hueValue').textContent = h;
+            document.getElementById('hueSlider').value = h;
+            document.getElementById('colorPreview').style.background = hueToCSS(h);
+        }
+
+        // Hue 滑条变化 (200ms 节流)
+        let colorThrottleTimer = null;
+        function onHueChange(val) {
+            document.getElementById('hueValue').textContent = val;
+            document.getElementById('colorPreview').style.background = hueToCSS(val);
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            if (colorThrottleTimer) return;
+            colorThrottleTimer = setTimeout(() => { colorThrottleTimer = null; }, 200);
+            applyHue(val);
+        }
+
+        // 预设颜色按钮
+        function selectPreset(btn) {
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            applyHue(parseInt(btn.dataset.hue));
+        }
+
+        // ===== 🔧 舵机校准逻辑 =====
+        let calibMode = false;
+        let calibPan = 90, calibTilt = 90;
+
+        function toggleCalibMode() {
+            // 校准时强制关闭自动追踪
+            const autoToggle = document.getElementById('autoToggle');
+            if (!calibMode && autoToggle.checked) {
+                autoToggle.checked = false;
+                toggleMode(autoToggle);
+            }
+            calibMode = !calibMode;
+            const btn = document.getElementById('calibToggle');
+            const controls = document.getElementById('calibControls');
+            if (calibMode) {
+                btn.textContent = '完成校准';
+                btn.classList.add('active');
+                controls.style.display = 'flex';
+                calibCenter();
+            } else {
+                btn.textContent = '开始校准';
+                btn.classList.remove('active');
+                controls.style.display = 'none';
+            }
+        }
+
+        function calibCenter() {
+            calibPan = 90;
+            calibTilt = 90;
+            calibApply();
+        }
+
+        function calibNudge(axis, delta) {
+            if (navigator.vibrate) navigator.vibrate(5);
+            if (axis === 'pan') {
+                calibPan = Math.max(0, Math.min(180, calibPan + delta));
+            } else {
+                calibTilt = Math.max(30, Math.min(150, calibTilt + delta));
+            }
+            calibApply();
+        }
+
+        function calibApply() {
+            document.getElementById('calib-pan-val').innerText = calibPan + '°';
+            document.getElementById('calib-tilt-val').innerText = calibTilt + '°';
+            // 同步主滑块
+            const panSlider = document.getElementById('range_pan');
+            const tiltSlider = document.getElementById('range_tilt');
+            if (panSlider) { panSlider.value = calibPan; document.getElementById('val_pan').innerText = calibPan; }
+            if (tiltSlider) { tiltSlider.value = calibTilt; document.getElementById('val_tilt').innerText = calibTilt; }
+            // 发送给舵机
+            socket.emit('control_pan', calibPan);
+            socket.emit('control_tilt', calibTilt);
+        }
+
+        // ===== 🎯 PID 调参逻辑 =====
+
+        // 展开/收起面板
+        function togglePidPanel() {
+            const body = document.getElementById('pidBody');
+            const arrow = document.getElementById('pidArrow');
+            body.classList.toggle('open');
+            arrow.classList.toggle('open');
+        }
+
+        // PID 滑块变化 (300ms 节流)
+        let pidThrottle = null;
+        function onPidChange() {
+            const kp = parseFloat(document.getElementById('pid_kp').value);
+            const ki = parseFloat(document.getElementById('pid_ki').value);
+            const kd = parseFloat(document.getElementById('pid_kd').value);
+            const dz = parseInt(document.getElementById('pid_dz').value);
+            // 更新显示
+            document.getElementById('val_kp').textContent = kp.toFixed(3);
+            document.getElementById('val_ki').textContent = ki.toFixed(4);
+            document.getElementById('val_kd').textContent = kd.toFixed(3);
+            document.getElementById('val_dz').textContent = dz + ' px';
+            // 取消预设激活态
+            document.querySelectorAll('.pid-preset-btn').forEach(b => b.classList.remove('active'));
+            // 节流发送
+            if (pidThrottle) return;
+            pidThrottle = setTimeout(() => { pidThrottle = null; }, 300);
+            socket.emit('set_pid', { kp, ki, kd, dead_zone: dz });
+        }
+
+        // PID 预设方案
+        function applyPidPreset(btn) {
+            document.querySelectorAll('.pid-preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const kp = parseFloat(btn.dataset.kp);
+            const ki = parseFloat(btn.dataset.ki);
+            const kd = parseFloat(btn.dataset.kd);
+            const dz = parseInt(btn.dataset.dz);
+            document.getElementById('pid_kp').value = kp;
+            document.getElementById('pid_ki').value = ki;
+            document.getElementById('pid_kd').value = kd;
+            document.getElementById('pid_dz').value = dz;
+            document.getElementById('val_kp').textContent = kp.toFixed(3);
+            document.getElementById('val_ki').textContent = ki.toFixed(4);
+            document.getElementById('val_kd').textContent = kd.toFixed(3);
+            document.getElementById('val_dz').textContent = dz + ' px';
+            socket.emit('set_pid', { kp, ki, kd, dead_zone: dz });
+        }
+    </script>
+</body>
+</html>
