@@ -1,3 +1,118 @@
+# 🎯 Color Tracked PTZ (Pan-Tilt-Zoom)
+
+HSV color tracking PTZ based on **Arduino UNO Q**. OpenCV identifies the target color → PID closed-loop control algorithm calculates the error → MG996R servos follow in real time, with a cyberpunk-style Web console provided.
+
+## ✨ Functional Features
+
+| Feature                       | Description                                                  |
+| ----------------------------- | ------------------------------------------------------------ |
+| 🎨 Dynamic Color Selection     | Hue slider + 6 color presets (Yellow/Red/Green/Blue/Orange/Purple) for real-time switching of the tracked color |
+| 🤖 PID Automatic Tracking      | Dual-axis independent PID closed-loop control, including deadband hysteresis, integral Anti-Windup, and EMA coordinate filtering |
+| 📊 PID Online Parameter Tuning | Four-parameter sliders (Kp/Ki/Kd/deadband) + 4 preset schemes (Default/Pure P/Conservative/Aggressive), taking effect in real time |
+| 🕹️ Manual Control              | Direct control via sliders for Pan (0-180°) / Tilt (30-150°) |
+| 🔧 Servo Neutral Calibration   | Fine adjustment (±1°/±5°) + one-click return to 90° neutral position, facilitating rocker arm installation |
+| 📹 Real-Time Video             | Base64 JPEG streaming (~25fps) with tracking markers displayed directly in the browser |
+
+## 🔌 Hardware Connection
+
+| Component           | Pin  | Description                   |
+| ------------------- | ---- | ----------------------------- |
+| Pan Servo (MG996R)  | D3   | Horizontal rotation (0°-180°) |
+| Tilt Servo (MG996R) | D11  | Vertical tilt (30°-150°)      |
+| USB Camera          | USB  | 320×240 MJPG                  |
+
+## 📁 Project Structure
+
+```
+color_tracked_plz/
+├── app.yaml           # Arduino App Configuration
+├── assets/
+│   └── index.html     # Single-file Web Console (CSS + HTML + JS, ~930 lines)
+├── python/
+│   └── main.py        # OpenCV Vision + PID Control + WebUI Service (~270 lines)
+└── sketch/
+    ├── sketch.ino     # Manual 50Hz PWM Servo Driver (~65 lines)
+    └── sketch.yaml    # Sketch Configuration (Arduino Zephyr UNO Q)
+```
+
+## 🧠 Core Algorithms
+
+### PID Closed-Loop Control
+
+Dual-axis independent PID controllers convert pixel errors into servo angle correction values:
+
+$$u(k) = K_p \cdot e(k) + K_i \cdot \sum_{j=0}^{k} e(j) + K_d \cdot [e(k) - e(k-1)]$$
+
+- **Proportional Term (P)**: Larger error leads to greater correction, providing fast response
+- **Integral Term (I)**: Accumulates historical errors to eliminate steady-state deviation, with Anti-Windup limiting (±500)
+- **Derivative Term (D)**: Detects the rate of error change to suppress overshoot and oscillation
+- **Deadband Hysteresis**: No action when error < 20px; reactivation requires error exceeding 26px to avoid edge jitter
+- **EMA Low-Pass Filter**: Exponential Moving Average (α=0.4) on detected coordinates to smooth inter-frame noise
+
+### Color Threshold Segmentation
+
+Color segmentation and centroid calculation based on the HSV color space:
+
+```
+BGR → HSV Conversion → inRange Threshold Segmentation → Erosion/Dilation Denoising
+→ findContours Contour Extraction → Largest Contour → minEnclosingCircle Centroid Localization
+```
+
+Red color automatically handles hue wrapping (merged dual masks for H≈170°~10°).
+
+### Manual PWM Servo Driving
+
+Instead of using the Servo library, 50Hz pulses are generated manually in `loop()`:
+
+```
+Angle → Pulse Width: pulse = 500 + (angle × 2000 / 180) μs
+0° → 500μs | 90° → 1500μs | 180° → 2500μs
+```
+
+## 🚀 Usage Instructions
+
+1. **Upload Sketch** — Compile and upload the `sketch/` directory to UNO Q
+2. **Start App** — Run the project in Arduino App Lab
+3. **Open Console** — Access `http://<UNO_Q_IP>:7000` in a browser
+4. **Select Color** — Choose the color to track using the Hue slider or preset color blocks
+5. **Enable Tracking** — Toggle the "Auto Tracking" switch to make the PTZ follow the target automatically
+
+### 🔧 Servo Calibration
+
+Use this when assembling for the first time or replacing the rocker arm:
+
+1. Click **"Start Calibration"** → Both axes automatically return to the 90° neutral position
+2. Use the **±1 / ±5** buttons to fine-tune to the servo's physical neutral position
+3. Install the servo rocker arm at the current angle
+4. Click **"Finish Calibration"** to exit
+
+> During calibration, auto tracking is forcibly disabled to ensure manual fine-tuning is not interfered with.
+
+### 🎯 PID Tuning Guide
+
+| Phenomenon                         | Adjustment Suggestion      |
+| ---------------------------------- | -------------------------- |
+| Too slow response                  | Increase Kp                |
+| Jitter/Oscillation                 | Increase Kd or decrease Kp |
+| Target centered but with deviation | Increase Ki                |
+| Jitter near the center             | Increase deadband          |
+
+Quick reference for four preset schemes:
+
+| Preset       | Kp    | Ki     | Kd    | Deadband | Application Scenario                    |
+| ------------ | ----- | ------ | ----- | -------- | --------------------------------------- |
+| Default      | 0.035 | 0.0005 | 0.025 | 20       | General balance                         |
+| Pure P       | 0.08  | 0      | 0     | 10       | Fast response with steady-state error   |
+| Conservative | 0.02  | 0.002  | 0.03  | 25       | Stable tracking                         |
+| Aggressive   | 0.06  | 0.003  | 0.04  | 10       | Sensitive tracking (possible overshoot) |
+
+## 🛠️ Technology Stack
+
+- **Arduino Firmware**: Manual 50Hz PWM + RouterBridge remote call
+- **Python Middleware**: OpenCV HSV color recognition + PID closed-loop control + EMA coordinate filtering + Base64 streaming
+- **Web Frontend**: Single-file HTML (cyberpunk style), Socket.IO bidirectional communication
+- **Communication Protocol**: RouterBridge (Python ↔ Arduino), Socket.IO (Browser ↔ Python)
+
 <!--
  * @Author: WALT
  * @Date: 2026-02-09 19:36:03
